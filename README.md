@@ -46,3 +46,33 @@ python -m src.bot
 
 - `src/prompts.py` — системный промпт (стиль, ограничения, формат ответа)
 
+## DeepSeek вместо OpenAI
+
+В `.env` на сервере (файл не в git):
+
+```env
+OPENAI_API_KEY=ваш_ключ_deepseek
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_MODEL=deepseek-chat
+```
+
+Перезапуск: `cd /opt/sosed-bot && docker compose up -d --build`
+
+## Деплой одной командой (Mac → GitHub → VPS)
+
+1) Один раз сделай скрипт исполняемым:
+
+```bash
+chmod +x scripts/deploy.sh
+```
+
+2) При каждом обновлении (из папки проекта на Mac):
+
+```bash
+./scripts/deploy.sh "краткое описание изменений"
+```
+
+Скрипт: коммитит изменения, пушит в `origin/master`, по SSH на сервере делает `git pull` и `docker compose up -d --build`. Файл `.env` на сервере **не трогает**.
+
+Переменные (если нужно): `DEPLOY_HOST`, `DEPLOY_DIR`, `DEPLOY_BRANCH`.
+
