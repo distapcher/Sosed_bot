@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from .config import Settings
@@ -15,7 +17,7 @@ def build_welcome_text(settings: Settings, *, has_access: bool, paid_until: str 
 
     access_block = ""
     if has_access and paid_until:
-        shown = paid_until.replace("T", " ").replace("+00:00", " UTC")
+        shown = escape(paid_until.replace("T", " ").replace("+00:00", " UTC"))
         access_block = f"\n✅ <b>Подписка до:</b> {shown}\n"
 
     return (
@@ -27,7 +29,7 @@ def build_welcome_text(settings: Settings, *, has_access: bool, paid_until: str 
         "\n"
         "<b>С чем помогаю:</b>\n"
         "✅ Дом и квартира: кран, розетка, мебель, уборка, кухня, мелкий ремонт\n"
-        "✅ Авто: уход, расходники, «что стучит», подготовка к сезону\n"
+        "✅ Авто: уход, расходники, что стучит, подготовка к сезону\n"
         "✅ Мото, велосипед, газонокосилка, бензопила — что в сарае лежит\n"
         "✅ Бытовая техника: стиралка, холодильник, плита, пылесос\n"
         "✅ Инструмент и крепёж — что взять и куда не промахнуться\n"

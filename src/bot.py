@@ -5,6 +5,7 @@ import logging
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .config import Settings, load_settings
@@ -53,32 +54,59 @@ def _format_paid_until(paid_until: str | None) -> str:
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    assert update.message
+    if not update.message:
+        return
+
     settings: Settings = context.application.bot_data["settings"]
     user = update.effective_user
-    _track_user(settings, user)
-
-    has_access = False
-    paid_until = None
-    if user is not None:
-        has_access = user_has_access(
-            settings.stats_db_path,
-            telegram_user_id=user.id,
-            free_user_ids=settings.free_telegram_user_ids,
-        )
-        paid_until = get_paid_until(settings.stats_db_path, user.id)
-
-    text = build_welcome_text(
-        settings,
-        has_access=has_access,
-        paid_until=paid_until,
-    )
     keyboard = build_welcome_keyboard()
 
-    await update.message.reply_text(
-        text,
-        parse_mode=ParseMode.HTML,
-        reply_markup=keyboard,
+    try:
+        _track_user(settings, user)
+
+        has_access = False
+        paid_until = None
+        if user is not None:
+            has_access = user_has_access(
+                settings.stats_db_path,
+                telegram_user_id=user.id,
+                free_user_ids=settings.free_telegram_user_ids,
+            )
+            paid_until = get_paid_until(settings.stats_db_path, user.id)
+
+        text = build_welcome_text(
+            settings,
+            has_access=has_access,
+            paid_until=paid_until,
+        )
+
+        try:
+            await update.message.reply_text(
+                text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=keyboard,
+            )
+        except BadRequest:
+            log.exception("HTML welcome failed, sending plain text")
+            await update.message.reply_text(
+                _welcome_plain(text),
+                reply_markup=keyboard,
+            )
+    except Exception:
+        log.exception("cmd_start failed")
+        await update.message.reply_text(
+            "Здорово, сосед. Я на связи — напиши, что стряслось.",
+            reply_markup=keyboard,
+        )
+
+
+def _welcome_plain(html_text: str) -> str:
+    return (
+        html_text.replace("<b>", "")
+        .replace("</b>", "")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
     )
 
 
@@ -267,6 +295,16 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(_safe_markdown(part))
 
 
+async def _on_startup(app: Application) -> None:
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    me = await app.bot.get_me()
+    log.info("Telegram bot @%s ready (webhook cleared)", me.username)
+
+
+async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.exception("Unhandled bot error: %s", context.error)
+
+
 def main() -> None:
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -286,11 +324,17 @@ def main() -> None:
     log.info("Stats DB: %s", settings.stats_db_path)
     mem = InMemoryHistory(max_messages=settings.max_history_messages)
 
-    app = Application.builder().token(settings.telegram_bot_token).build()
+    app = (
+        Application.builder()
+        .token(settings.telegram_bot_token)
+        .post_init(_on_startup)
+        .build()
+    )
     app.bot_data["settings"] = settings
     app.bot_data["llm_client"] = client
     app.bot_data["mem"] = mem
 
+    app.add_error_handler(_on_error)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(on_pay_button, pattern="^pay_subscription$"))
     app.add_handler(CommandHandler("pay", cmd_pay))
@@ -299,7 +343,7 @@ def main() -> None:
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
     log.info("Sosed bot started")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
