@@ -6,7 +6,7 @@
 #   ./scripts/deploy.sh "fix prompts"
 #
 # Optional env overrides:
-#   DEPLOY_HOST=root@50.114.102.254
+#   DEPLOY_HOST=root@2.27.25.85
 #   DEPLOY_DIR=/opt/sosed-bot
 #   DEPLOY_BRANCH=master
 
@@ -15,7 +15,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-DEPLOY_HOST="${DEPLOY_HOST:-root@50.114.102.254}"
+DEPLOY_HOST="${DEPLOY_HOST:-root@2.27.25.85}"
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/sosed-bot}"
 DEPLOY_BRANCH="${DEPLOY_BRANCH:-master}"
 COMMIT_MSG="${1:-Update Sosed bot}"

@@ -76,6 +76,55 @@ chmod +x scripts/deploy.sh
 
 Переменные (если нужно): `DEPLOY_HOST`, `DEPLOY_DIR`, `DEPLOY_BRANCH`.
 
+По умолчанию VPS: `root@2.27.25.85`, каталог `/opt/sosed-bot`.
+
+## Новый VPS (миграция)
+
+1) **SSH с Mac** (один раз добавьте ключ на сервер):
+
+```bash
+ssh-copy-id root@2.27.25.85
+```
+
+2) **На новом сервере** (установка Docker, git, клон репо):
+
+```bash
+ssh root@2.27.25.85
+apt update && apt install -y git curl
+git clone https://github.com/distapcher/Sosed_bot.git /opt/sosed-bot
+cd /opt/sosed-bot
+bash scripts/server-setup.sh
+```
+
+Или одной строкой с Mac после `ssh-copy-id`:
+
+```bash
+ssh root@2.27.25.85 'bash -s' < scripts/server-setup.sh
+```
+
+3) **Перенести `.env`** со старого сервера (если там уже настроен):
+
+```bash
+scp root@50.114.102.254:/opt/sosed-bot/.env root@2.27.25.85:/opt/sosed-bot/.env
+```
+
+4) **Остановить бота на старом VPS** (иначе два процесса polling — тишина в Telegram):
+
+```bash
+ssh root@50.114.102.254 'cd /opt/sosed-bot && docker compose stop sosed'
+```
+
+5) **Запуск на новом**:
+
+```bash
+ssh root@2.27.25.85 'cd /opt/sosed-bot && docker compose build --pull=false && docker compose up -d'
+bash scripts/check-server.sh   # на сервере, из /opt/sosed-bot
+```
+
+6) Дальнейшие обновления с Mac: `./scripts/deploy.sh "описание"`
+
+Проверка Telegram с сервера: `bash scripts/check-server.sh` (включает `getMe`).
+
 ## Бот отвечает «лампочка в подъезде»
 
 Это значит, что Telegram работает, а запрос к LLM (DeepSeek/OpenAI) падает. На сервере:
