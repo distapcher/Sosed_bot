@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from dotenv import load_dotenv
-from telegram import Update, User
+from telegram import LinkPreviewOptions, Update, User
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
@@ -22,8 +22,13 @@ from .prompts import SYSTEM_PROMPT_RU, USER_HINT
 from .stats import calc_cost_usd, get_user_usage_usd, init_db, record_usage, touch_user
 from .text_utils import split_reply
 from .telegram_io import build_telegram_request, reply_text_retry, send_message_retry
-from .share import build_share_keyboard, build_share_post_text, share_link_preview_options
-from .telegraph_promo import get_channel_promo_url
+from .share import (
+    build_launch_bot_keyboard,
+    build_share_keyboard,
+    build_share_post_text,
+    share_link_preview_options,
+)
+from .telegraph_promo import sync_channel_promo_page
 from .welcome import build_welcome_text
 
 log = logging.getLogger("sosed")
@@ -94,7 +99,7 @@ async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     settings: Settings = context.application.bot_data["settings"]
     try:
-        channel_link = get_channel_promo_url(settings.stats_db_path, username)
+        channel_link = sync_channel_promo_page(settings.stats_db_path, username)
     except Exception:
         log.exception("Telegraph promo page failed, fallback to t.me")
         channel_link = f"https://t.me/{username}"
@@ -104,6 +109,7 @@ async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         bot_name=me.first_name,
         channel_link=channel_link,
     )
+    chat_id = update.effective_chat.id if update.effective_chat else 0
     await reply_text_retry(
         update.message,
         post_text,
@@ -113,6 +119,13 @@ async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             channel_link=channel_link,
         ),
         link_preview_options=share_link_preview_options(),
+    )
+    await send_message_retry(
+        context.bot,
+        chat_id,
+        "👇 Перешлите это сообщение в канал — под постом будет кнопка запуска бота:",
+        reply_markup=build_launch_bot_keyboard(username),
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
     )
 
 

@@ -7,6 +7,20 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOpti
 from .promo import PROMO_DESCRIPTION, PROMO_TITLE, bot_telegram_url
 
 
+def build_launch_bot_keyboard(bot_username: str) -> InlineKeyboardMarkup:
+    """Кнопка для пересылки в канал (превью telegra.ph кнопку не даёт)."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🚀 Запустить бота",
+                    url=bot_telegram_url(bot_username),
+                )
+            ],
+        ]
+    )
+
+
 def build_share_post_text(
     *,
     bot_username: str,
@@ -21,8 +35,10 @@ def build_share_post_text(
         "\n"
         f"{PROMO_DESCRIPTION}\n"
         "\n"
-        "Для канала вставьте ссылку ниже (будет карточка с описанием):\n"
-        f"👉 {channel_link}"
+        "1️⃣ В канал — ссылка с карточкой (превью):\n"
+        f"👉 {channel_link}\n"
+        "\n"
+        "2️⃣ Перешлите следующее сообщение от бота — там кнопка «Запустить бота»."
         f"{extra_tg}"
     )
 

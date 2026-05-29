@@ -61,9 +61,16 @@ async def send_message_retry(
     chat_id: int,
     text: str,
     *,
+    reply_markup: InlineKeyboardMarkup | None = None,
+    link_preview_options: LinkPreviewOptions | None = None,
     attempts: int = 5,
 ) -> Message:
     return await _send_with_retry(
-        lambda: bot.send_message(chat_id=chat_id, text=text),
+        lambda: bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup,
+            link_preview_options=link_preview_options,
+        ),
         attempts=attempts,
     )
