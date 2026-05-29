@@ -46,6 +46,7 @@ class Settings:
     admin_password: str
     web_host: str
     web_port: int
+    web_session_secret: str
     cost_input_per_1m_usd: float
     cost_output_per_1m_usd: float
 
@@ -81,6 +82,7 @@ def load_settings(*, require_admin_password: bool = False) -> Settings:
         admin_password=admin_password,
         web_host=getenv("WEB_HOST", "0.0.0.0").strip() or "0.0.0.0",
         web_port=_int("WEB_PORT", 8080),
+        web_session_secret=getenv("WEB_SESSION_SECRET", "").strip(),
         cost_input_per_1m_usd=_float("COST_INPUT_PER_1M_USD", 0.27),
         cost_output_per_1m_usd=_float("COST_OUTPUT_PER_1M_USD", 1.10),
     )
