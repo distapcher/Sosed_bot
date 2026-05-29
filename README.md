@@ -76,3 +76,39 @@ chmod +x scripts/deploy.sh
 
 Переменные (если нужно): `DEPLOY_HOST`, `DEPLOY_DIR`, `DEPLOY_BRANCH`.
 
+## Бот отвечает «лампочка в подъезде»
+
+Это значит, что Telegram работает, а запрос к LLM (DeepSeek/OpenAI) падает. На сервере:
+
+```bash
+cd /opt/sosed-bot
+grep OPENAI_BASE_URL .env
+grep OPENAI_MODEL .env
+docker compose logs --tail=50
+```
+
+Для DeepSeek в `.env` должно быть:
+
+```env
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+OPENAI_MODEL=deepseek-chat
+```
+
+Проверка API из контейнера (подставится из `.env`):
+
+```bash
+docker compose exec sosed python -c "
+import os
+from openai import OpenAI
+c = OpenAI(api_key=os.environ['OPENAI_API_KEY'], base_url=os.environ['OPENAI_BASE_URL'], timeout=60)
+r = c.chat.completions.create(
+    model=os.environ['OPENAI_MODEL'],
+    messages=[{'role': 'user', 'content': 'скажи ок'}],
+    max_tokens=20,
+)
+print(r.choices[0].message.content)
+"
+```
+
+Частые причины: неверный ключ, нет баланса на DeepSeek, в `.env` остался URL OpenAI (`api.openai.com`) с ключом DeepSeek.
+

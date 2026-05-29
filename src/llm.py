@@ -17,6 +17,7 @@ def build_client(settings: Settings) -> OpenAI:
     return OpenAI(
         api_key=settings.openai_api_key,
         base_url=settings.openai_base_url,
+        timeout=60.0,
     )
 
 

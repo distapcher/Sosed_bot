@@ -10,6 +10,7 @@ from .config import load_settings
 from .llm import ChatMsg, build_client, chat_completion
 from .memory import InMemoryHistory
 from .prompts import SYSTEM_PROMPT_RU, USER_HINT
+from .text_utils import split_reply
 
 log = logging.getLogger("sosed")
 
@@ -56,8 +57,8 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     try:
         answer = chat_completion(client, settings=settings, messages=msgs)
-    except Exception:
-        log.exception("LLM call failed")
+    except Exception as e:
+        log.exception("LLM call failed: %s", e)
         await update.message.reply_text(
             "Ох, сосед, мозги мои сейчас как лампочка в подъезде — моргнули и потухли. "
             "Попробуй ещё раз через минутку."
@@ -68,7 +69,9 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         answer = "Сосед, я тут задумался… а конкретнее можно? Что именно надо сделать?"
 
     mem.append(chat_id, "assistant", answer)
-    await update.message.reply_text(_safe_markdown(answer))
+
+    for part in split_reply(answer, settings.max_message_chars):
+        await update.message.reply_text(_safe_markdown(part))
 
 
 def main() -> None:
@@ -77,6 +80,7 @@ def main() -> None:
 
     settings = load_settings()
     client = build_client(settings)
+    log.info("LLM: base_url=%s model=%s", settings.openai_base_url, settings.openai_model)
     mem = InMemoryHistory(max_messages=settings.max_history_messages)
 
     app = Application.builder().token(settings.telegram_bot_token).build()
