@@ -91,11 +91,20 @@ async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
         return
 
-    post_text = build_share_post_text(bot_username=username, bot_name=me.first_name)
+    settings: Settings = context.application.bot_data["settings"]
+    post_text = build_share_post_text(
+        bot_username=username,
+        bot_name=me.first_name,
+        public_promo_base_url=settings.public_promo_base_url,
+    )
     await reply_text_retry(
         update.message,
         post_text,
-        reply_markup=build_share_keyboard(bot_username=username, post_text=post_text),
+        reply_markup=build_share_keyboard(
+            bot_username=username,
+            post_text=post_text,
+            public_promo_base_url=settings.public_promo_base_url,
+        ),
         link_preview_options=share_link_preview_options(),
     )
 

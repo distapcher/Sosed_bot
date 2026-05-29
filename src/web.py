@@ -10,15 +10,19 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import Settings, load_settings
+from .promo import PROMO_DESCRIPTION, PROMO_TITLE, bot_telegram_url, promo_image_url, promo_page_url
 from .stats import get_summary, get_users, init_db
 
 security = HTTPBasic(auto_error=False)
 log = logging.getLogger("sosed.web")
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+_APP_DIR = Path(__file__).resolve().parent
+templates = Jinja2Templates(directory=str(_APP_DIR / "templates"))
+_STATIC_DIR = _APP_DIR / "static"
 
 SESSION_KEY = "sosed_dashboard_user"
 
@@ -45,9 +49,17 @@ def _session_ok(request: Request, settings: Settings) -> bool:
     return isinstance(user, str) and secrets.compare_digest(user, settings.admin_user)
 
 
+def _public_base_url(request: Request, settings: Settings) -> str:
+    if settings.public_promo_base_url:
+        return settings.public_promo_base_url.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
 def create_app(settings: Settings) -> FastAPI:
     app = FastAPI(title="Sosed Dashboard", docs_url=None, redoc_url=None)
     app.add_middleware(SessionMiddleware, secret_key=_session_secret(settings), https_only=False)
+    if _STATIC_DIR.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -78,6 +90,27 @@ def create_app(settings: Settings) -> FastAPI:
     def logout(request: Request) -> RedirectResponse:
         request.session.clear()
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+
+    @app.get("/promo", response_class=HTMLResponse, response_model=None)
+    def promo_landing(request: Request) -> HTMLResponse:
+        """Публичная страница с Open Graph — для постов в каналах (не голый t.me)."""
+        base = _public_base_url(request, settings)
+        page_url = promo_page_url(base)
+        return templates.TemplateResponse(
+            request,
+            "promo.html",
+            {
+                "title": PROMO_TITLE,
+                "description": PROMO_DESCRIPTION,
+                "page_url": page_url,
+                "image_url": promo_image_url(base),
+                "bot_url": bot_telegram_url(settings.bot_username),
+            },
+        )
+
+    @app.get("/go")
+    def promo_redirect() -> RedirectResponse:
+        return RedirectResponse(bot_telegram_url(settings.bot_username), status_code=302)
 
     @app.get("/", response_class=HTMLResponse, response_model=None)
     def dashboard(
