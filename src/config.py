@@ -32,6 +32,25 @@ def _int_env(*names: str, default: int) -> int:
     return default
 
 
+def _bool(name: str, default: bool = False) -> bool:
+    raw = getenv(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _csv_ints(name: str) -> frozenset[int]:
+    raw = getenv(name, "").strip()
+    if not raw:
+        return frozenset()
+    result: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part:
+            result.add(int(part))
+    return frozenset(result)
+
+
 @dataclass(frozen=True)
 class Settings:
     telegram_bot_token: str
@@ -48,6 +67,15 @@ class Settings:
     web_port: int
     cost_input_per_1m_usd: float
     cost_output_per_1m_usd: float
+    payment_enabled: bool
+    yookassa_shop_id: str
+    yookassa_secret_key: str
+    payment_amount_rub: float
+    payment_access_days: int
+    payment_description: str
+    payment_return_url: str
+    public_base_url: str
+    free_telegram_user_ids: frozenset[int]
 
 
 def load_settings(*, require_admin_password: bool = False) -> Settings:
@@ -68,6 +96,13 @@ def load_settings(*, require_admin_password: bool = False) -> Settings:
     if require_admin_password and not admin_password:
         raise ValueError("Missing ADMIN_PASSWORD in environment (required for web dashboard)")
 
+    bot_username = getenv("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@")
+    payment_return_url = getenv("PAYMENT_RETURN_URL", "").strip()
+    if not payment_return_url and bot_username:
+        payment_return_url = f"https://t.me/{bot_username}"
+
+    public_base_url = getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")
+
     return Settings(
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
@@ -83,4 +118,13 @@ def load_settings(*, require_admin_password: bool = False) -> Settings:
         web_port=_int("WEB_PORT", 8080),
         cost_input_per_1m_usd=_float("COST_INPUT_PER_1M_USD", 0.27),
         cost_output_per_1m_usd=_float("COST_OUTPUT_PER_1M_USD", 1.10),
+        payment_enabled=_bool("PAYMENT_ENABLED", default=False),
+        yookassa_shop_id=getenv("YOOKASSA_SHOP_ID", "").strip(),
+        yookassa_secret_key=getenv("YOOKASSA_SECRET_KEY", "").strip(),
+        payment_amount_rub=_float("PAYMENT_AMOUNT_RUB", 199.0),
+        payment_access_days=_int("PAYMENT_ACCESS_DAYS", 30),
+        payment_description=getenv("PAYMENT_DESCRIPTION", "Доступ к боту Сосед").strip(),
+        payment_return_url=payment_return_url,
+        public_base_url=public_base_url,
+        free_telegram_user_ids=_csv_ints("FREE_TELEGRAM_USER_IDS"),
     )

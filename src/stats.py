@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 
@@ -20,6 +20,17 @@ class UserStats:
     completion_tokens: int
     total_tokens: int
     cost_usd: float
+    paid_until: str | None
+
+
+@dataclass(frozen=True)
+class PaymentRecord:
+    payment_id: str
+    telegram_user_id: int
+    amount_rub: float
+    status: str
+    created_at: str
+    paid_at: str | None
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,33 @@ def init_db(db_path: str) -> None:
                 ON usage_events(created_at);
             """
         )
+        _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "paid_until" not in user_cols:
+        conn.execute("ALTER TABLE users ADD COLUMN paid_until TEXT")
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS payments (
+            payment_id TEXT PRIMARY KEY,
+            telegram_user_id INTEGER NOT NULL,
+            amount_rub REAL NOT NULL,
+            status TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            paid_at TEXT,
+            access_days INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_payments_user_id
+            ON payments(telegram_user_id)
+        """
+    )
 
 
 @contextmanager
@@ -122,6 +160,118 @@ def touch_user(
                 now,
                 increment_messages,
             ),
+        )
+
+
+def user_has_access(
+    db_path: str,
+    *,
+    telegram_user_id: int,
+    free_user_ids: frozenset[int],
+) -> bool:
+    if telegram_user_id in free_user_ids:
+        return True
+
+    paid_until = get_paid_until(db_path, telegram_user_id)
+    if not paid_until:
+        return False
+
+    try:
+        until = datetime.fromisoformat(paid_until)
+    except ValueError:
+        return False
+
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=UTC)
+    return until > datetime.now(UTC)
+
+
+def get_paid_until(db_path: str, telegram_user_id: int) -> str | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT paid_until FROM users WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ).fetchone()
+    if row is None or row["paid_until"] is None:
+        return None
+    return str(row["paid_until"])
+
+
+def save_pending_payment(
+    db_path: str,
+    *,
+    payment_id: str,
+    telegram_user_id: int,
+    amount_rub: float,
+    access_days: int,
+) -> None:
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO payments (
+                payment_id, telegram_user_id, amount_rub, status, created_at, access_days
+            ) VALUES (?, ?, ?, 'pending', ?, ?)
+            """,
+            (payment_id, telegram_user_id, amount_rub, _now_iso(), access_days),
+        )
+
+
+def mark_payment_succeeded(
+    db_path: str,
+    *,
+    payment_id: str,
+    telegram_user_id: int,
+    access_days: int,
+) -> None:
+    now = _now_iso()
+    now_dt = datetime.now(UTC)
+
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT status FROM payments WHERE payment_id = ?",
+            (payment_id,),
+        ).fetchone()
+        if row and row["status"] == "succeeded":
+            return
+
+        current_paid_until = conn.execute(
+            "SELECT paid_until FROM users WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ).fetchone()
+
+        base = now_dt
+        if current_paid_until and current_paid_until["paid_until"]:
+            try:
+                existing = datetime.fromisoformat(str(current_paid_until["paid_until"]))
+                if existing.tzinfo is None:
+                    existing = existing.replace(tzinfo=UTC)
+                if existing > base:
+                    base = existing
+            except ValueError:
+                pass
+
+        new_until = (base + timedelta(days=access_days)).replace(microsecond=0).isoformat()
+
+        conn.execute(
+            """
+            INSERT INTO users (
+                telegram_user_id, username, first_name, last_name,
+                first_seen_at, last_seen_at, message_count, paid_until
+            ) VALUES (?, NULL, NULL, NULL, ?, ?, 0, ?)
+            ON CONFLICT(telegram_user_id) DO UPDATE SET paid_until = excluded.paid_until
+            """,
+            (telegram_user_id, now, now, new_until),
+        )
+        conn.execute(
+            """
+            INSERT INTO payments (
+                payment_id, telegram_user_id, amount_rub, status, created_at, paid_at, access_days
+            ) VALUES (?, ?, 0, 'succeeded', ?, ?, ?)
+            ON CONFLICT(payment_id) DO UPDATE SET
+                status = 'succeeded',
+                paid_at = excluded.paid_at
+            """,
+            (payment_id, telegram_user_id, now, now, access_days),
         )
 
 
@@ -199,7 +349,8 @@ def get_users(db_path: str) -> list[UserStats]:
             SELECT
                 telegram_user_id, username, first_name, last_name,
                 first_seen_at, last_seen_at, message_count,
-                prompt_tokens, completion_tokens, total_tokens, cost_usd
+                prompt_tokens, completion_tokens, total_tokens, cost_usd,
+                paid_until
             FROM users
             ORDER BY last_seen_at DESC
             """
@@ -218,6 +369,7 @@ def get_users(db_path: str) -> list[UserStats]:
             completion_tokens=int(row["completion_tokens"]),
             total_tokens=int(row["total_tokens"]),
             cost_usd=float(row["cost_usd"]),
+            paid_until=row["paid_until"],
         )
         for row in rows
     ]

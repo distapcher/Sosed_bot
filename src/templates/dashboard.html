@@ -103,6 +103,7 @@
           <th>Сообщений</th>
           <th>Токены (in / out)</th>
           <th>Расход</th>
+          <th>Доступ до</th>
           <th>Последняя активность</th>
         </tr>
       </thead>
@@ -122,11 +123,12 @@
             <br><span style="color: var(--muted)">Σ {{ user.total_tokens }}</span>
           </td>
           <td class="mono">${{ "%.4f"|format(user.cost_usd) }}</td>
+          <td class="mono">{{ user.paid_until or "—" }}</td>
           <td class="mono">{{ user.last_seen_at }}</td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="6">Пока никто не писал боту.</td>
+          <td colspan="7">Пока никто не писал боту.</td>
         </tr>
         {% endfor %}
       </tbody>
