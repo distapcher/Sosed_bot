@@ -4,8 +4,7 @@ import logging
 
 from dotenv import load_dotenv
 from telegram import Update, User
-from telegram.constants import ChatAction, ParseMode
-from telegram.error import BadRequest
+from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .config import Settings, load_settings
@@ -14,6 +13,7 @@ from .memory import InMemoryHistory
 from .prompts import SYSTEM_PROMPT_RU, USER_HINT
 from .stats import calc_cost_usd, init_db, record_usage, touch_user
 from .text_utils import split_reply
+from .telegram_io import build_telegram_request, reply_text_retry
 from .welcome import build_welcome_text
 
 log = logging.getLogger("sosed")
@@ -38,35 +38,30 @@ def _track_user(settings: Settings, user: User | None, *, increment_messages: in
     return user.id
 
 
-def _welcome_plain(html_text: str) -> str:
-    return (
-        html_text.replace("<b>", "")
-        .replace("</b>", "")
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-    )
-
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message:
         return
 
-    settings: Settings = context.application.bot_data["settings"]
     user = update.effective_user
+    log.info("cmd_start from user_id=%s", user.id if user else None)
 
     try:
-        _track_user(settings, user)
-        text = build_welcome_text()
-
+        settings: Settings = context.application.bot_data["settings"]
         try:
-            await update.message.reply_text(text, parse_mode=ParseMode.HTML)
-        except BadRequest:
-            log.exception("HTML welcome failed, sending plain text")
-            await update.message.reply_text(_welcome_plain(text))
+            _track_user(settings, user)
+        except Exception:
+            log.exception("stats touch_user failed in /start")
+
+        await reply_text_retry(update.message, build_welcome_text())
     except Exception:
         log.exception("cmd_start failed")
-        await update.message.reply_text("Здорово, сосед. Я на связи — напиши, что стряслось.")
+        try:
+            await reply_text_retry(
+                update.message,
+                "Здорово, сосед. Я на связи — напиши, что стряслось.",
+            )
+        except Exception:
+            log.exception("cmd_start fallback reply failed")
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -76,7 +71,7 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id if update.effective_chat else 0
     _track_user(settings, update.effective_user)
     mem.clear(chat_id)
-    await update.message.reply_text("Ладно, сосед, начнём с чистого листа. Что делаем?")
+    await reply_text_retry(update.message, "Ладно, сосед, начнём с чистого листа. Что делаем?")
 
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -107,9 +102,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             result = chat_completion(client, settings=settings, messages=msgs)
         except Exception as e:
             log.exception("LLM call failed: %s", e)
-            await update.message.reply_text(
+            await reply_text_retry(
+                update.message,
                 "Ох, сосед, мозги мои сейчас как лампочка в подъезде — моргнули и потухли. "
-                "Попробуй ещё раз через минутку."
+                "Попробуй ещё раз через минутку.",
             )
             return
 
@@ -135,22 +131,28 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         mem.append(chat_id, "assistant", answer)
 
         for part in split_reply(answer, settings.max_message_chars):
-            await update.message.reply_text(_safe_markdown(part))
+            await reply_text_retry(update.message, _safe_markdown(part))
     except Exception:
         log.exception("on_text failed for chat_id=%s", chat_id)
-        await update.message.reply_text(
-            "Сосед, что-то у меня внутри хрустнуло. Попробуй ещё раз или /reset."
+        await reply_text_retry(
+            update.message,
+            "Сосед, что-то у меня внутри хрустнуло. Попробуй ещё раз или /reset.",
         )
 
 
 async def _on_startup(app: Application) -> None:
-    await app.bot.delete_webhook(drop_pending_updates=True)
-    me = await app.bot.get_me()
-    log.info("Telegram bot @%s ready (webhook cleared)", me.username)
+    log.info("Post-init: ожидаем подключение к Telegram (медленная сеть — это нормально)")
 
 
 async def _on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     log.exception("Unhandled bot error: %s", context.error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                "Сосед, сбой на линии. Попробуй /start или напиши ещё раз."
+            )
+        except Exception:
+            pass
 
 
 def main() -> None:
@@ -167,6 +169,15 @@ def main() -> None:
     app = (
         Application.builder()
         .token(settings.telegram_bot_token)
+        .request(build_telegram_request())
+        .connect_timeout(60.0)
+        .read_timeout(90.0)
+        .write_timeout(90.0)
+        .pool_timeout(60.0)
+        .get_updates_connect_timeout(60.0)
+        .get_updates_read_timeout(90.0)
+        .get_updates_write_timeout(90.0)
+        .get_updates_pool_timeout(60.0)
         .post_init(_on_startup)
         .build()
     )
@@ -179,8 +190,12 @@ def main() -> None:
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
-    log.info("Sosed bot started")
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    log.info("Sosed bot starting polling (bootstrap_retries=-1 for slow network)")
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+        bootstrap_retries=-1,
+    )
 
 
 if __name__ == "__main__":

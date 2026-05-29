@@ -56,7 +56,9 @@ def create_app(settings: Settings) -> FastAPI:
 
 def main() -> None:
     load_dotenv()
-    settings = load_settings(require_admin_password=True)
+    settings = load_settings()
+    if not settings.admin_password:
+        raise ValueError("Missing ADMIN_PASSWORD in environment (required for web dashboard)")
     init_db(settings.stats_db_path)
     app = create_app(settings)
     uvicorn.run(app, host=settings.web_host, port=settings.web_port, log_level="info")
