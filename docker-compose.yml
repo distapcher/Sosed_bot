@@ -2,6 +2,7 @@ services:
   sosed:
     build: .
     restart: unless-stopped
+    network_mode: host
     env_file:
       - .env
     volumes:

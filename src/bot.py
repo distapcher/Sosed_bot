@@ -13,7 +13,7 @@ from .memory import InMemoryHistory
 from .prompts import SYSTEM_PROMPT_RU, USER_HINT
 from .stats import calc_cost_usd, init_db, record_usage, touch_user
 from .text_utils import split_reply
-from .telegram_io import build_telegram_request, reply_text_retry
+from .telegram_io import build_telegram_request, reply_text_retry, send_message_retry
 from .welcome import build_welcome_text
 
 log = logging.getLogger("sosed")
@@ -39,11 +39,12 @@ def _track_user(settings: Settings, user: User | None, *, increment_messages: in
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message:
+    if not update.message or not update.effective_chat:
         return
 
+    chat_id = update.effective_chat.id
     user = update.effective_user
-    log.info("cmd_start from user_id=%s", user.id if user else None)
+    log.info("cmd_start chat_id=%s user_id=%s", chat_id, user.id if user else None)
 
     try:
         settings: Settings = context.application.bot_data["settings"]
@@ -52,13 +53,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         except Exception:
             log.exception("stats touch_user failed in /start")
 
-        await reply_text_retry(update.message, build_welcome_text())
+        # Короткий ответ первым — быстрее доходит при плохой сети
+        await send_message_retry(context.bot, chat_id, "Здорово, сосед. На связи 👋")
+        await send_message_retry(context.bot, chat_id, build_welcome_text())
+        log.info("cmd_start: welcome sent to chat_id=%s", chat_id)
     except Exception:
         log.exception("cmd_start failed")
         try:
-            await reply_text_retry(
-                update.message,
-                "Здорово, сосед. Я на связи — напиши, что стряслось.",
+            await send_message_retry(
+                context.bot,
+                chat_id,
+                "Сосед тут, но связь барахлит. Напиши ещё раз через минуту.",
             )
         except Exception:
             log.exception("cmd_start fallback reply failed")
