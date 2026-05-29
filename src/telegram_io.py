@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from telegram import Bot, InlineKeyboardMarkup, Message
+from telegram import Bot, InlineKeyboardMarkup, LinkPreviewOptions, Message
 from telegram.error import NetworkError, TimedOut
 from telegram.request import HTTPXRequest
 
@@ -43,10 +43,15 @@ async def reply_text_retry(
     text: str,
     *,
     reply_markup: InlineKeyboardMarkup | None = None,
+    link_preview_options: LinkPreviewOptions | None = None,
     attempts: int = 5,
 ) -> Message:
     return await _send_with_retry(
-        lambda: message.reply_text(text, reply_markup=reply_markup),
+        lambda: message.reply_text(
+            text,
+            reply_markup=reply_markup,
+            link_preview_options=link_preview_options,
+        ),
         attempts=attempts,
     )
 

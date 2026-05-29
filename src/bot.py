@@ -22,6 +22,7 @@ from .prompts import SYSTEM_PROMPT_RU, USER_HINT
 from .stats import calc_cost_usd, get_user_usage_usd, init_db, record_usage, touch_user
 from .text_utils import split_reply
 from .telegram_io import build_telegram_request, reply_text_retry, send_message_retry
+from .share import build_share_keyboard, build_share_post_text, share_link_preview_options
 from .welcome import build_welcome_text
 
 log = logging.getLogger("sosed")
@@ -75,6 +76,28 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             )
         except Exception:
             log.exception("cmd_start fallback reply failed")
+
+
+async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+
+    me = await context.bot.get_me()
+    username = me.username
+    if not username:
+        await reply_text_retry(
+            update.message,
+            "Не могу получить адрес бота. Попробуй позже.",
+        )
+        return
+
+    post_text = build_share_post_text(bot_username=username, bot_name=me.first_name)
+    await reply_text_retry(
+        update.message,
+        post_text,
+        reply_markup=build_share_keyboard(bot_username=username, post_text=post_text),
+        link_preview_options=share_link_preview_options(),
+    )
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -237,6 +260,7 @@ def main() -> None:
 
     app.add_error_handler(_on_error)
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("share", cmd_share))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CallbackQueryHandler(on_topup_callback, pattern="^topup:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
