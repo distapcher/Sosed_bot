@@ -85,6 +85,39 @@ def _migrate_users(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE users ADD COLUMN balance_usd REAL NOT NULL DEFAULT 0")
 
 
+def get_meta(db_path: str, key: str) -> str | None:
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return str(row["value"]) if row else None
+
+
+def set_meta(db_path: str, key: str, value: str) -> None:
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO meta (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            (key, value),
+        )
+
+
 @contextmanager
 def _connect(db_path: str):
     conn = sqlite3.connect(db_path, timeout=30.0)

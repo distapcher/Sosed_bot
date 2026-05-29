@@ -23,6 +23,7 @@ from .stats import calc_cost_usd, get_user_usage_usd, init_db, record_usage, tou
 from .text_utils import split_reply
 from .telegram_io import build_telegram_request, reply_text_retry, send_message_retry
 from .share import build_share_keyboard, build_share_post_text, share_link_preview_options
+from .telegraph_promo import get_channel_promo_url
 from .welcome import build_welcome_text
 
 log = logging.getLogger("sosed")
@@ -92,10 +93,16 @@ async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     settings: Settings = context.application.bot_data["settings"]
+    try:
+        channel_link = get_channel_promo_url(settings.stats_db_path, username)
+    except Exception:
+        log.exception("Telegraph promo page failed, fallback to t.me")
+        channel_link = f"https://t.me/{username}"
+
     post_text = build_share_post_text(
         bot_username=username,
         bot_name=me.first_name,
-        public_promo_base_url=settings.public_promo_base_url,
+        channel_link=channel_link,
     )
     await reply_text_retry(
         update.message,
@@ -103,7 +110,7 @@ async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         reply_markup=build_share_keyboard(
             bot_username=username,
             post_text=post_text,
-            public_promo_base_url=settings.public_promo_base_url,
+            channel_link=channel_link,
         ),
         link_preview_options=share_link_preview_options(),
     )
