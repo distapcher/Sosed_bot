@@ -53,7 +53,7 @@ def create_app(settings: Settings) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/login", response_class=HTMLResponse)
+    @app.get("/login", response_class=HTMLResponse, response_model=None)
     def login_page(request: Request) -> HTMLResponse | RedirectResponse:
         if _session_ok(request, settings):
             return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
@@ -79,7 +79,7 @@ def create_app(settings: Settings) -> FastAPI:
         request.session.clear()
         return RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
 
-    @app.get("/", response_class=HTMLResponse)
+    @app.get("/", response_class=HTMLResponse, response_model=None)
     def dashboard(
         request: Request,
         credentials: HTTPBasicCredentials | None = Depends(security),
