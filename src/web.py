@@ -59,7 +59,7 @@ def create_app(settings: Settings) -> FastAPI:
             return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
         return templates.TemplateResponse(request, "login.html", {"error": error})
 
-    @app.post("/login")
+    @app.post("/login", response_model=None)
     async def login_submit(request: Request) -> RedirectResponse | HTMLResponse:
         form = await request.form()
         username = str(form.get("username", "")).strip()
