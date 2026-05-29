@@ -171,18 +171,13 @@ def main() -> None:
     log.info("Stats DB: %s", settings.stats_db_path)
     mem = InMemoryHistory(max_messages=settings.max_history_messages)
 
+    # Таймауты только в HTTPXRequest — нельзя дублировать через .connect_timeout() и т.д.
+    tg_request = build_telegram_request()
     app = (
         Application.builder()
         .token(settings.telegram_bot_token)
-        .request(build_telegram_request())
-        .connect_timeout(60.0)
-        .read_timeout(90.0)
-        .write_timeout(90.0)
-        .pool_timeout(60.0)
-        .get_updates_connect_timeout(60.0)
-        .get_updates_read_timeout(90.0)
-        .get_updates_write_timeout(90.0)
-        .get_updates_pool_timeout(60.0)
+        .request(tg_request)
+        .get_updates_request(build_telegram_request())
         .post_init(_on_startup)
         .build()
     )
