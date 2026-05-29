@@ -8,15 +8,12 @@ from .promo import PROMO_DESCRIPTION, PROMO_TITLE, bot_telegram_url
 
 
 def build_share_post_text(*, bot_username: str, bot_name: str | None = None) -> str:
-    display = bot_name.strip() if bot_name else "Сосед"
     link = bot_telegram_url(bot_username)
     return (
-        f"🔧 {display} — {PROMO_TITLE}\n"
+        f"🔧 {PROMO_TITLE}\n"
         "\n"
         f"{PROMO_DESCRIPTION}\n"
-        "\n"
-        "Перешлите это сообщение в группу или канал — будет превью и кнопка ниже.\n"
-        f"👉 {link}"
+        f"\n👉 {link}"
     )
 
 
