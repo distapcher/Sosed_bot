@@ -95,7 +95,7 @@ async def cmd_share(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await reply_text_retry(
         update.message,
         post_text,
-        reply_markup=build_share_keyboard(bot_username=username, post_text=post_text),
+        reply_markup=build_share_keyboard(bot_username=username),
         link_preview_options=share_link_preview_options(),
     )
 
