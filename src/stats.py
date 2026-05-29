@@ -76,6 +76,13 @@ def init_db(db_path: str) -> None:
                 ON usage_events(created_at);
             """
         )
+        _migrate_users(conn)
+
+
+def _migrate_users(conn: sqlite3.Connection) -> None:
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "balance_usd" not in cols:
+        conn.execute("ALTER TABLE users ADD COLUMN balance_usd REAL NOT NULL DEFAULT 0")
 
 
 @contextmanager
@@ -165,6 +172,18 @@ def record_usage(
                 telegram_user_id,
             ),
         )
+
+
+def get_user_usage_usd(db_path: str, telegram_user_id: int) -> tuple[float, float]:
+    """(накопленный расход cost_usd, оплаченный баланс balance_usd)."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT cost_usd, balance_usd FROM users WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ).fetchone()
+    if row is None:
+        return 0.0, 0.0
+    return float(row["cost_usd"]), float(row["balance_usd"])
 
 
 def get_summary(db_path: str) -> SummaryStats:

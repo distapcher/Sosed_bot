@@ -5,13 +5,21 @@ import logging
 from dotenv import load_dotenv
 from telegram import Update, User
 from telegram.constants import ChatAction
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import (
+    Application,
+    CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from .config import Settings, load_settings
+from .credits import build_paywall_text, build_topup_keyboard, is_usage_limit_reached
 from .llm import ChatMsg, build_client, chat_completion
 from .memory import InMemoryHistory
 from .prompts import SYSTEM_PROMPT_RU, USER_HINT
-from .stats import calc_cost_usd, init_db, record_usage, touch_user
+from .stats import calc_cost_usd, get_user_usage_usd, init_db, record_usage, touch_user
 from .text_utils import split_reply
 from .telegram_io import build_telegram_request, reply_text_retry, send_message_retry
 from .welcome import build_welcome_text
@@ -79,6 +87,35 @@ async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await reply_text_retry(update.message, "Ладно, сосед, начнём с чистого листа. Что делаем?")
 
 
+async def _send_usage_limit_message(
+    update: Update,
+    settings: Settings,
+    *,
+    user_id: int,
+) -> None:
+    assert update.message
+    usage_cost, balance = get_user_usage_usd(settings.stats_db_path, user_id)
+    log.info(
+        "usage limit reached user_id=%s cost=%.6f balance=%.6f limit=%.4f",
+        user_id,
+        usage_cost,
+        balance,
+        settings.free_usage_limit_usd,
+    )
+    await reply_text_retry(
+        update.message,
+        build_paywall_text(limit_usd=settings.free_usage_limit_usd),
+        reply_markup=build_topup_keyboard(),
+    )
+
+
+async def on_topup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if not query:
+        return
+    await query.answer("Оплата скоро подключим — пока это заглушка.")
+
+
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
@@ -91,7 +128,19 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_text = update.message.text.strip()
 
     try:
-        user_id = _track_user(settings, user, increment_messages=1)
+        user_id = _track_user(settings, user, increment_messages=0)
+
+        if user_id is not None:
+            usage_cost, balance = get_user_usage_usd(settings.stats_db_path, user_id)
+            if is_usage_limit_reached(
+                usage_cost_usd=usage_cost,
+                balance_usd=balance,
+                limit_usd=settings.free_usage_limit_usd,
+            ):
+                await _send_usage_limit_message(update, settings, user_id=user_id)
+                return
+
+        _track_user(settings, user, increment_messages=1)
 
         mem.append(chat_id, "user", user_text)
 
@@ -169,6 +218,7 @@ def main() -> None:
     client = build_client(settings)
     log.info("LLM: base_url=%s model=%s", settings.openai_base_url, settings.openai_model)
     log.info("Stats DB: %s", settings.stats_db_path)
+    log.info("Free usage limit: $%.4f per user", settings.free_usage_limit_usd)
     mem = InMemoryHistory(max_messages=settings.max_history_messages)
 
     # Таймауты только в HTTPXRequest — нельзя дублировать через .connect_timeout() и т.д.
@@ -188,6 +238,7 @@ def main() -> None:
     app.add_error_handler(_on_error)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("reset", cmd_reset))
+    app.add_handler(CallbackQueryHandler(on_topup_callback, pattern="^topup:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
     log.info("Sosed bot starting polling (bootstrap_retries=-1 for slow network)")

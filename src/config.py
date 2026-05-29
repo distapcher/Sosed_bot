@@ -49,6 +49,7 @@ class Settings:
     web_session_secret: str
     cost_input_per_1m_usd: float
     cost_output_per_1m_usd: float
+    free_usage_limit_usd: float
 
 
 def load_settings(*, require_admin_password: bool = False) -> Settings:
@@ -85,4 +86,5 @@ def load_settings(*, require_admin_password: bool = False) -> Settings:
         web_session_secret=getenv("WEB_SESSION_SECRET", "").strip(),
         cost_input_per_1m_usd=_float("COST_INPUT_PER_1M_USD", 0.27),
         cost_output_per_1m_usd=_float("COST_OUTPUT_PER_1M_USD", 1.10),
+        free_usage_limit_usd=_float("FREE_USAGE_LIMIT_USD", 0.1),
     )
