@@ -14,6 +14,16 @@ def _int(name: str, default: int) -> int:
         raise ValueError(f"Env var {name} must be int, got {raw!r}") from e
 
 
+def _float(name: str, default: float) -> float:
+    raw = getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError as e:
+        raise ValueError(f"Env var {name} must be float, got {raw!r}") from e
+
+
 def _int_env(*names: str, default: int) -> int:
     for name in names:
         raw = getenv(name)
@@ -31,9 +41,16 @@ class Settings:
     max_history_messages: int
     max_output_tokens: int
     max_message_chars: int
+    stats_db_path: str
+    admin_user: str
+    admin_password: str
+    web_host: str
+    web_port: int
+    cost_input_per_1m_usd: float
+    cost_output_per_1m_usd: float
 
 
-def load_settings() -> Settings:
+def load_settings(*, require_admin_password: bool = False) -> Settings:
     telegram_bot_token = getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not telegram_bot_token:
         raise ValueError("Missing TELEGRAM_BOT_TOKEN in environment")
@@ -47,6 +64,10 @@ def load_settings() -> Settings:
     if not openai_model:
         raise ValueError("OPENAI_MODEL must not be empty")
 
+    admin_password = getenv("ADMIN_PASSWORD", "").strip()
+    if require_admin_password and not admin_password:
+        raise ValueError("Missing ADMIN_PASSWORD in environment (required for web dashboard)")
+
     return Settings(
         telegram_bot_token=telegram_bot_token,
         openai_api_key=openai_api_key,
@@ -55,5 +76,11 @@ def load_settings() -> Settings:
         max_history_messages=_int("MAX_HISTORY_MESSAGES", 12),
         max_output_tokens=_int("MAX_OUTPUT_TOKENS", 600),
         max_message_chars=_int_env("MAX_MESSAGE_CHARS", "MAX_REPLY_CHARS", default=1000),
+        stats_db_path=getenv("STATS_DB_PATH", "/data/stats.db").strip(),
+        admin_user=getenv("ADMIN_USER", "admin").strip() or "admin",
+        admin_password=admin_password,
+        web_host=getenv("WEB_HOST", "0.0.0.0").strip() or "0.0.0.0",
+        web_port=_int("WEB_PORT", 8080),
+        cost_input_per_1m_usd=_float("COST_INPUT_PER_1M_USD", 0.27),
+        cost_output_per_1m_usd=_float("COST_OUTPUT_PER_1M_USD", 1.10),
     )
-

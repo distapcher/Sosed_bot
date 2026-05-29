@@ -112,3 +112,39 @@ print(r.choices[0].message.content)
 
 Частые причины: неверный ключ, нет баланса на DeepSeek, в `.env` остался URL OpenAI (`api.openai.com`) с ключом DeepSeek.
 
+## Web-дашборд статистики
+
+Вместе с ботом поднимается сервис `web` — страница со статистикой:
+
+- сколько пользователей писали боту
+- Telegram ID, `@username`, имя
+- число сообщений
+- токены (input / output) и оценка расхода в USD по каждому пользователю
+
+### Настройка на сервере
+
+Добавь в `/opt/sosed-bot/.env`:
+
+```env
+ADMIN_USER=admin
+ADMIN_PASSWORD=надёжный_пароль
+WEB_PORT=8080
+STATS_DB_PATH=/data/stats.db
+COST_INPUT_PER_1M_USD=0.27
+COST_OUTPUT_PER_1M_USD=1.10
+```
+
+Перезапуск:
+
+```bash
+cd /opt/sosed-bot
+docker compose up -d --build
+```
+
+Открой в браузере: `http://IP_СЕРВЕРА:8080`  
+Логин: `ADMIN_USER`, пароль: `ADMIN_PASSWORD`.
+
+**Безопасность:** не открывай порт 8080 всем подряд. Лучше ограничить доступ фаерволом (только твой IP) или позже поставить HTTPS через nginx.
+
+Статистика копится с момента обновления — старые диалоги до обновления в базу не попадут.
+
