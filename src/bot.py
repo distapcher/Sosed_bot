@@ -219,9 +219,10 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     ):
         await update.message.reply_text(
-            f"Сосед, без абонемента не советую — хозяйство тоже не бесплатное.\n\n"
-            f"/pay — доступ на {settings.payment_access_days} дн. за {settings.payment_amount_rub:.0f} ₽\n"
-            "/status — проверить подписку"
+            f"Сосед, без подписки в советы не лезу — хозяйство тоже не бесплатное.\n\n"
+            f"/start — кнопка «Оплатить подписку» ({settings.payment_amount_rub:.0f} ₽, "
+            f"{settings.payment_access_days} дн.)\n"
+            "/status — проверить срок"
         )
         return
 
