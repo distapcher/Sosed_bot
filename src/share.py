@@ -7,56 +7,28 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOpti
 from .promo import PROMO_DESCRIPTION, PROMO_TITLE, bot_telegram_url
 
 
-def build_launch_bot_keyboard(bot_username: str) -> InlineKeyboardMarkup:
-    """Кнопка для пересылки в канал (превью telegra.ph кнопку не даёт)."""
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    "🚀 Запустить бота",
-                    url=bot_telegram_url(bot_username),
-                )
-            ],
-        ]
-    )
-
-
-def build_share_post_text(
-    *,
-    bot_username: str,
-    bot_name: str | None = None,
-    channel_link: str,
-) -> str:
+def build_share_post_text(*, bot_username: str, bot_name: str | None = None) -> str:
     display = bot_name.strip() if bot_name else "Сосед"
-    tg_link = bot_telegram_url(bot_username)
-    extra_tg = "" if channel_link.rstrip("/") == tg_link.rstrip("/") else f"\n\nВ Telegram: {tg_link}"
+    link = bot_telegram_url(bot_username)
     return (
         f"🔧 {display} — {PROMO_TITLE}\n"
         "\n"
         f"{PROMO_DESCRIPTION}\n"
         "\n"
-        "1️⃣ В канал — ссылка с карточкой (превью):\n"
-        f"👉 {channel_link}\n"
-        "\n"
-        "2️⃣ Перешлите следующее сообщение от бота — там кнопка «Запустить бота»."
-        f"{extra_tg}"
+        "Перешлите это сообщение в группу или канал — будет превью и кнопка ниже.\n"
+        f"👉 {link}"
     )
 
 
-def build_share_keyboard(
-    *,
-    bot_username: str,
-    post_text: str,
-    channel_link: str,
-) -> InlineKeyboardMarkup:
-    tg_link = bot_telegram_url(bot_username)
+def build_share_keyboard(*, bot_username: str, post_text: str) -> InlineKeyboardMarkup:
+    link = bot_telegram_url(bot_username)
     share_dialog_url = (
         "https://t.me/share/url?"
-        f"url={quote(channel_link, safe='')}&text={quote(post_text, safe='')}"
+        f"url={quote(link, safe='')}&text={quote(post_text, safe='')}"
     )
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🚀 Открыть бота", url=tg_link)],
+            [InlineKeyboardButton("🚀 Запустить бота", url=link)],
             [InlineKeyboardButton("📤 Поделиться в Telegram", url=share_dialog_url)],
         ]
     )
