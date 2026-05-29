@@ -3,27 +3,18 @@ from __future__ import annotations
 import logging
 
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, User
-from telegram.constants import ParseMode
+from telegram import Update, User
+from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
-from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 from .config import Settings, load_settings
 from .llm import ChatMsg, build_client, chat_completion
 from .memory import InMemoryHistory
-from .payments import configure_yookassa, create_subscription_payment
 from .prompts import SYSTEM_PROMPT_RU, USER_HINT
-from .stats import (
-    calc_cost_usd,
-    get_paid_until,
-    init_db,
-    record_usage,
-    save_pending_payment,
-    touch_user,
-    user_has_access,
-)
+from .stats import calc_cost_usd, init_db, record_usage, touch_user
 from .text_utils import split_reply
-from .welcome import build_welcome_keyboard, build_welcome_text
+from .welcome import build_welcome_text
 
 log = logging.getLogger("sosed")
 
@@ -47,59 +38,6 @@ def _track_user(settings: Settings, user: User | None, *, increment_messages: in
     return user.id
 
 
-def _format_paid_until(paid_until: str | None) -> str:
-    if not paid_until:
-        return "нет активной подписки"
-    return paid_until.replace("T", " ").replace("+00:00", " UTC")
-
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message:
-        return
-
-    settings: Settings = context.application.bot_data["settings"]
-    user = update.effective_user
-    keyboard = build_welcome_keyboard()
-
-    try:
-        _track_user(settings, user)
-
-        has_access = False
-        paid_until = None
-        if user is not None:
-            has_access = user_has_access(
-                settings.stats_db_path,
-                telegram_user_id=user.id,
-                free_user_ids=settings.free_telegram_user_ids,
-            )
-            paid_until = get_paid_until(settings.stats_db_path, user.id)
-
-        text = build_welcome_text(
-            settings,
-            has_access=has_access,
-            paid_until=paid_until,
-        )
-
-        try:
-            await update.message.reply_text(
-                text,
-                parse_mode=ParseMode.HTML,
-                reply_markup=keyboard,
-            )
-        except BadRequest:
-            log.exception("HTML welcome failed, sending plain text")
-            await update.message.reply_text(
-                _welcome_plain(text),
-                reply_markup=keyboard,
-            )
-    except Exception:
-        log.exception("cmd_start failed")
-        await update.message.reply_text(
-            "Здорово, сосед. Я на связи — напиши, что стряслось.",
-            reply_markup=keyboard,
-        )
-
-
 def _welcome_plain(html_text: str) -> str:
     return (
         html_text.replace("<b>", "")
@@ -110,108 +48,25 @@ def _welcome_plain(html_text: str) -> str:
     )
 
 
-async def handle_pay_request(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    user = update.effective_user
-    if message is None or user is None:
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
         return
 
     settings: Settings = context.application.bot_data["settings"]
-    _track_user(settings, user)
-
-    if not settings.payment_enabled:
-        await message.reply_text(
-            "Подписка скоро будет доступна. А пока пиши — Сосед на связи."
-        )
-        return
-
-    if not settings.yookassa_shop_id or not settings.yookassa_secret_key:
-        await message.reply_text(
-            "Оплата пока не настроена на сервере. Напиши владельцу бота."
-        )
-        return
-
-    if user_has_access(
-        settings.stats_db_path,
-        telegram_user_id=user.id,
-        free_user_ids=settings.free_telegram_user_ids,
-    ):
-        paid_until = get_paid_until(settings.stats_db_path, user.id)
-        await message.reply_text(
-            f"У тебя уже есть доступ до {_format_paid_until(paid_until)}. "
-            "Если продлить — оплати ещё раз, дни добавятся."
-        )
+    user = update.effective_user
 
     try:
-        created = create_subscription_payment(settings, telegram_user_id=user.id)
-        save_pending_payment(
-            settings.stats_db_path,
-            payment_id=created.payment_id,
-            telegram_user_id=user.id,
-            amount_rub=created.amount_rub,
-            access_days=settings.payment_access_days,
-        )
+        _track_user(settings, user)
+        text = build_welcome_text()
+
+        try:
+            await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        except BadRequest:
+            log.exception("HTML welcome failed, sending plain text")
+            await update.message.reply_text(_welcome_plain(text))
     except Exception:
-        log.exception("Failed to create YooKassa payment")
-        await message.reply_text(
-            "Не вышло выставить счёт. Попробуй через минутку или напиши владельцу бота."
-        )
-        return
-
-    keyboard = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(text="💳 Оплатить подписку", url=created.confirmation_url)]]
-    )
-    await message.reply_text(
-        f"Сумма: {created.amount_rub:.0f} ₽ · срок: {settings.payment_access_days} дн.\n\n"
-        "Жми кнопку ниже — после оплаты доступ включится автоматически.",
-        reply_markup=keyboard,
-    )
-
-
-async def on_pay_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    if query is None:
-        return
-    await query.answer()
-    await handle_pay_request(update, context)
-
-
-async def cmd_pay(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await handle_pay_request(update, context)
-
-
-async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    assert update.message
-    settings: Settings = context.application.bot_data["settings"]
-    user = update.effective_user
-    if user is None:
-        return
-
-    _track_user(settings, user)
-
-    if not settings.payment_enabled:
-        await update.message.reply_text("Оплата выключена — пользуйся на здоровье, сосед.")
-        return
-
-    if user.id in settings.free_telegram_user_ids:
-        await update.message.reply_text("Тебе всё открыто — ты в списке своих.")
-        return
-
-    paid_until = get_paid_until(settings.stats_db_path, user.id)
-    if user_has_access(
-        settings.stats_db_path,
-        telegram_user_id=user.id,
-        free_user_ids=settings.free_telegram_user_ids,
-    ):
-        await update.message.reply_text(
-            f"Доступ есть, сосед. Действует до: {_format_paid_until(paid_until)}."
-        )
-        return
-
-    await update.message.reply_text(
-        f"Доступа пока нет. Оформи через /pay — {settings.payment_amount_rub:.0f} ₽ "
-        f"на {settings.payment_access_days} дн."
-    )
+        log.exception("cmd_start failed")
+        await update.message.reply_text("Здорово, сосед. Я на связи — напиши, что стряслось.")
 
 
 async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -232,67 +87,60 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     client = context.application.bot_data["llm_client"]
     mem: InMemoryHistory = context.application.bot_data["mem"]
     user = update.effective_user
-
     chat_id = update.effective_chat.id if update.effective_chat else 0
-    user_id = _track_user(settings, user, increment_messages=1)
     user_text = update.message.text.strip()
 
-    if (
-        settings.payment_enabled
-        and user_id is not None
-        and not user_has_access(
-            settings.stats_db_path,
-            telegram_user_id=user_id,
-            free_user_ids=settings.free_telegram_user_ids,
-        )
-    ):
-        await update.message.reply_text(
-            f"Сосед, без подписки в советы не лезу — хозяйство тоже не бесплатное.\n\n"
-            f"/start — кнопка «Оплатить подписку» ({settings.payment_amount_rub:.0f} ₽, "
-            f"{settings.payment_access_days} дн.)\n"
-            "/status — проверить срок"
-        )
-        return
-
-    mem.append(chat_id, "user", user_text)
-
-    history = mem.get(chat_id)
-    msgs: list[ChatMsg] = [ChatMsg(role="system", content=SYSTEM_PROMPT_RU)]
-    msgs.append(ChatMsg(role="user", content=USER_HINT))
-    for h in history:
-        msgs.append(ChatMsg(role=h.role, content=h.content))
-
     try:
-        result = chat_completion(client, settings=settings, messages=msgs)
-    except Exception as e:
-        log.exception("LLM call failed: %s", e)
+        user_id = _track_user(settings, user, increment_messages=1)
+
+        mem.append(chat_id, "user", user_text)
+
+        history = mem.get(chat_id)
+        system_content = f"{SYSTEM_PROMPT_RU}\n\n{USER_HINT}"
+        msgs: list[ChatMsg] = [ChatMsg(role="system", content=system_content)]
+        for h in history:
+            msgs.append(ChatMsg(role=h.role, content=h.content))
+
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
+        try:
+            result = chat_completion(client, settings=settings, messages=msgs)
+        except Exception as e:
+            log.exception("LLM call failed: %s", e)
+            await update.message.reply_text(
+                "Ох, сосед, мозги мои сейчас как лампочка в подъезде — моргнули и потухли. "
+                "Попробуй ещё раз через минутку."
+            )
+            return
+
+        answer = result.content or (
+            "Сосед, я тут задумался… а конкретнее можно? Что именно надо сделать?"
+        )
+
+        if user_id is not None and result.total_tokens > 0:
+            cost = calc_cost_usd(
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+                input_price_per_1m=settings.cost_input_per_1m_usd,
+                output_price_per_1m=settings.cost_output_per_1m_usd,
+            )
+            record_usage(
+                settings.stats_db_path,
+                telegram_user_id=user_id,
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+                cost_usd=cost,
+            )
+
+        mem.append(chat_id, "assistant", answer)
+
+        for part in split_reply(answer, settings.max_message_chars):
+            await update.message.reply_text(_safe_markdown(part))
+    except Exception:
+        log.exception("on_text failed for chat_id=%s", chat_id)
         await update.message.reply_text(
-            "Ох, сосед, мозги мои сейчас как лампочка в подъезде — моргнули и потухли. "
-            "Попробуй ещё раз через минутку."
+            "Сосед, что-то у меня внутри хрустнуло. Попробуй ещё раз или /reset."
         )
-        return
-
-    answer = result.content or "Сосед, я тут задумался… а конкретнее можно? Что именно надо сделать?"
-
-    if user_id is not None and result.total_tokens > 0:
-        cost = calc_cost_usd(
-            prompt_tokens=result.prompt_tokens,
-            completion_tokens=result.completion_tokens,
-            input_price_per_1m=settings.cost_input_per_1m_usd,
-            output_price_per_1m=settings.cost_output_per_1m_usd,
-        )
-        record_usage(
-            settings.stats_db_path,
-            telegram_user_id=user_id,
-            prompt_tokens=result.prompt_tokens,
-            completion_tokens=result.completion_tokens,
-            cost_usd=cost,
-        )
-
-    mem.append(chat_id, "assistant", answer)
-
-    for part in split_reply(answer, settings.max_message_chars):
-        await update.message.reply_text(_safe_markdown(part))
 
 
 async def _on_startup(app: Application) -> None:
@@ -311,14 +159,6 @@ def main() -> None:
 
     settings = load_settings()
     init_db(settings.stats_db_path)
-
-    if settings.payment_enabled:
-        if settings.yookassa_shop_id and settings.yookassa_secret_key:
-            configure_yookassa(settings)
-            log.info("YooKassa payments enabled")
-        else:
-            log.warning("PAYMENT_ENABLED=true but YooKassa credentials are missing")
-
     client = build_client(settings)
     log.info("LLM: base_url=%s model=%s", settings.openai_base_url, settings.openai_model)
     log.info("Stats DB: %s", settings.stats_db_path)
@@ -336,9 +176,6 @@ def main() -> None:
 
     app.add_error_handler(_on_error)
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(on_pay_button, pattern="^pay_subscription$"))
-    app.add_handler(CommandHandler("pay", cmd_pay))
-    app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
